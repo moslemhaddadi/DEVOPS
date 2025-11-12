@@ -74,4 +74,3 @@ pipeline {
             echo 'Pipeline terminé avec succès !'
         }
     }
-}
