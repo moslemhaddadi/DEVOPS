@@ -28,7 +28,7 @@ pipeline {
                 withSonarQubeEnv('MySonarQubeServer') {
                     // CORRECTION : Ajout du paramètre -Dsonar.login=${SONAR_AUTH_TOKEN} pour l'authentification.
                     // ${SONAR_AUTH_TOKEN} est une variable spéciale fournie par withSonarQubeEnv.
-                    sh 'mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${SONAR_URL} -Dsonar.login=${SONAR_AUTH_TOKEN}'
+                    sh "mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${SONAR_URL} -Dsonar.login=${SONAR_AUTH_TOKEN}"
                 }
             }
         }
