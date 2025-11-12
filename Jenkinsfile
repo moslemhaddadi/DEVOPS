@@ -1,110 +1,98 @@
-// Jenkinsfile - Version Corrigée (sans plugin Docker Pipeline)
+// Jenkinsfile - Version Corrigée et Complète (2025-11-12)
 pipeline {
-    // On définit un agent global. Toutes les étapes s'exécuteront sur cet agent.
+    // Utilise n'importe quel agent disponible.
+    // Assurez-vous que cet agent a Docker installé et que l'utilisateur 'jenkins' a le droit de l'utiliser.
     agent any
 
     environment {
-           SONARQUBE_URL = 'http://localhost:9000'
-        PATH = "$PATH:/var/lib/jenkins/.local/bin"
-        BUILD_TIMESTAMP = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
-    }
+        // URL de votre serveur SonarQube. Assurez-vous qu'il est accessible depuis Jenkins.
+        SONAR_URL = "http://localhost:9000"
+        // URL de l'application une fois déployée en staging (pour le test DAST )
+        STAGING_APP_URL = "http://staging.mon-app.com"
+        // Nom de l'image Docker qui sera construite
+        DOCKER_IMAGE_NAME = "mon-app"
     }
 
     stages {
-        // --- ÉTAPE 1 : BUILD ---
-        stage('1. Checkout' ) {
-            steps {
-                git 'https://github.com/moslemhaddadi/DEVOPS.git'
-            }
-        }
+        // L'étape de checkout initiale est supprimée car Jenkins le fait déjà implicitement.
+        // Le pipeline commence directement par les étapes de sécurité.
 
-        // --- ÉTAPE 2 : CONTRÔLES DE SÉCURITÉ PRÉ-BUILD ---
-        stage('2. Secrets Scan (Gitleaks )') {
+        stage('1. Secrets Scan (Gitleaks )') {
             steps {
                 script {
                     try {
-                        // CORRECTION : On exécute Gitleaks via une commande 'docker run' manuelle.
-                        // --rm : supprime le conteneur après exécution.
-                        // -v ${env.WORKSPACE}:/path : monte le répertoire du projet Jenkins dans le conteneur.
+                        // Exécute Gitleaks dans un conteneur Docker pour scanner le code source.
+                        // Le volume -v monte le répertoire du projet dans le conteneur pour l'analyse.
                         sh "docker run --rm -v ${env.WORKSPACE}:/path zricethezav/gitleaks:latest detect --source=/path --verbose --exit-code 1 --report-path /path/gitleaks-report.json"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        error("FAIL: Des secrets ont été détectés dans le code ! Rapport disponible.")
+                        error("FAIL: Des secrets ont été détectés dans le code ! Consultez le rapport gitleaks-report.json.")
                     }
                 }
             }
         }
 
-        // --- ÉTAPE 3 : BUILD & ANALYSE STATIQUE ---
-        stage('3. SAST (SonarQube)') {
-            // Pas de changement ici, car cette étape n'utilisait pas d'agent Docker.
+        stage('2. SAST (SonarQube)') {
             steps {
+                // Analyse le code avec SonarQube via Maven.
+                // 'MySonarQubeServer' doit être configuré dans Manage Jenkins > Configure System > SonarQube servers.
                 withSonarQubeEnv('MySonarQubeServer') {
                     sh 'mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${SONAR_URL}'
                 }
             }
         }
 
-        stage('4. Quality Gate (SonarQube)') {
-            // Pas de changement ici.
+        stage('3. Quality Gate (SonarQube)') {
             steps {
+                // Attend le résultat de l'analyse et bloque le pipeline si la Quality Gate de SonarQube échoue.
                 waitForQualityGate abortPipeline: true
             }
         }
 
-        // --- ÉTAPE 4 : ANALYSE DES DÉPENDANCES ET DE L'IMAGE ---
-        stage('5. SCA & Build Docker Image (Trivy)') {
+        stage('4. SCA & Build Docker Image (Trivy)') {
             steps {
                 script {
-                    // A. Analyse des dépendances du projet (SCA)
-                    // CORRECTION : On exécute Trivy via une commande 'docker run' manuelle.
+                    // A. Analyse des dépendances du projet (SCA) avec Trivy.
                     sh "docker run --rm -v ${env.WORKSPACE}:/path aquasec/trivy:latest fs --exit-code 1 --severity CRITICAL,HIGH /path > trivy-fs-report.txt"
 
-                    // B. Construction de l'image Docker
-                    // Pas de changement ici, la syntaxe docker.build() est fournie par le plugin Docker Pipeline,
-                    // mais elle est souvent disponible même si 'agent { docker }' ne l'est pas.
-                    // Si cette ligne échoue aussi, il faudra la remplacer par 'sh "docker build -t mon-app:${env.BUILD_ID}" .'
-                    def dockerImage = docker.build("mon-app:${env.BUILD_ID}")
+                    // B. Construction de l'image Docker.
+                    sh "docker build -t ${DOCKER_IMAGE_NAME}:${env.BUILD_ID} ."
 
-                    // C. Scan de l'image Docker fraîchement construite
-                    // CORRECTION : On utilise une commande 'sh' standard.
-                    sh "docker run --rm aquasec/trivy:latest image --exit-code 1 --severity CRITICAL,HIGH mon-app:${env.BUILD_ID} > trivy-image-report.txt"
+                    // C. Scan de l'image Docker fraîchement construite avec Trivy.
+                    sh "docker run --rm aquasec/trivy:latest image --exit-code 1 --severity CRITICAL,HIGH ${DOCKER_IMAGE_NAME}:${env.BUILD_ID} > trivy-image-report.txt"
                 }
             }
         }
 
-        // --- ÉTAPE 5 : DÉPLOIEMENT ET ANALYSE DYNAMIQUE ---
-        stage('6. Deploy to Staging') {
+        stage('5. Deploy to Staging') {
             steps {
-                echo "Déploiement de l'image mon-app:${env.BUILD_ID} sur staging..."
-                // sh "./deploy-staging.sh mon-app:${env.BUILD_ID}"
+                echo "Déploiement de l'image ${DOCKER_IMAGE_NAME}:${env.BUILD_ID} sur staging..."
+                // sh "./deploy-staging.sh ${DOCKER_IMAGE_NAME}:${env.BUILD_ID}"
             }
         }
 
-        stage('7. DAST (OWASP ZAP)') {
+        stage('6. DAST (OWASP ZAP)') {
             steps {
-                // CORRECTION : On exécute ZAP via une commande 'docker run' manuelle.
-                // On doit s'assurer que le conteneur ZAP peut atteindre l'URL de l'application.
-                // L'option --network="host" peut être nécessaire si l'app tourne sur localhost.
+                // Lance un scan dynamique sur l'application déployée.
+                // Le conteneur ZAP doit pouvoir accéder à l'URL de staging.
                 sh "docker run --rm -v ${env.WORKSPACE}:/zap/wrk/:rw owasp/zap2docker-stable zap-baseline.py -t ${STAGING_APP_URL} -g gen.conf -r dast-report.html"
             }
         }
-    }
+    } // Fin du bloc 'stages'
 
-    // --- ÉTAPE 6 : REPORTING & ALERTING ---
     post {
-        // Pas de changement dans cette section.
         always {
-            echo 'Pipeline terminé. Archivage des rapports...'
+            echo 'Pipeline terminé. Archivage des rapports de sécurité...'
+            // Archive tous les rapports générés pour les consulter dans l'interface Jenkins.
             archiveArtifacts artifacts: '*.json, *.txt, *.html', allowEmptyArchive: true
         }
         failure {
-            mail to: 'equipe-dev@example.com',
-                 subject: "ÉCHEC Pipeline: ${currentBuild.fullDisplayName}",
-                 body: "Le pipeline a échoué à l'étape : ${currentBuild.currentResult}. Consultez les logs : ${env.BUILD_URL}"
+            // La notification par email est désactivée pour éviter une erreur si le serveur SMTP n'est pas configuré.
+            echo "Le pipeline a échoué. L'envoi d'email est désactivé."
         }
         success {
-            echo 'Pipeline réussi !'
+            echo 'Pipeline terminé avec succès !'
         }
-    }
-}
+    } // Fin du bloc 'post'
+
+} // Fin du bloc 'pipeline'
