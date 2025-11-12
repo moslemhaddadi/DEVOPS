@@ -8,7 +8,7 @@ pipeline {
         BUILD_TIMESTAMP = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
     }
 
-    }
+    
 
     stages {
         stage('1. Secrets Scan (Gitleaks )') {
@@ -73,4 +73,6 @@ pipeline {
         success {
             echo 'Pipeline terminé avec succès !'
         }
+    }
+
     }
