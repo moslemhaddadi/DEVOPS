@@ -1,28 +1,18 @@
-// Jenkinsfile - Version Corrigée et Complète (2025-11-12)
+// Jenkinsfile - Version Corrigée et Complète (avec authentification SonarQube)
 pipeline {
-    // Utilise n'importe quel agent disponible.
-    // Assurez-vous que cet agent a Docker installé et que l'utilisateur 'jenkins' a le droit de l'utiliser.
     agent any
 
     environment {
-        // URL de votre serveur SonarQube. Assurez-vous qu'il est accessible depuis Jenkins.
         SONAR_URL = "http://localhost:9000"
-        // URL de l'application une fois déployée en staging (pour le test DAST )
         STAGING_APP_URL = "http://staging.mon-app.com"
-        // Nom de l'image Docker qui sera construite
         DOCKER_IMAGE_NAME = "mon-app"
     }
 
     stages {
-        // L'étape de checkout initiale est supprimée car Jenkins le fait déjà implicitement.
-        // Le pipeline commence directement par les étapes de sécurité.
-
         stage('1. Secrets Scan (Gitleaks )') {
             steps {
                 script {
                     try {
-                        // Exécute Gitleaks dans un conteneur Docker pour scanner le code source.
-                        // Le volume -v monte le répertoire du projet dans le conteneur pour l'analyse.
                         sh "docker run --rm -v ${env.WORKSPACE}:/path zricethezav/gitleaks:latest detect --source=/path --verbose --exit-code 1 --report-path /path/gitleaks-report.json"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
@@ -34,10 +24,11 @@ pipeline {
 
         stage('2. SAST (SonarQube)') {
             steps {
-                // Analyse le code avec SonarQube via Maven.
-                // 'MySonarQubeServer' doit être configuré dans Manage Jenkins > Configure System > SonarQube servers.
+                // 'MySonarQubeServer' doit correspondre au nom configuré dans Manage Jenkins > Configure System.
                 withSonarQubeEnv('MySonarQubeServer') {
-                    sh 'mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${SONAR_URL}'
+                    // CORRECTION : Ajout du paramètre -Dsonar.login=${SONAR_AUTH_TOKEN} pour l'authentification.
+                    // ${SONAR_AUTH_TOKEN} est une variable spéciale fournie par withSonarQubeEnv.
+                    sh 'mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${SONAR_URL} -Dsonar.login=${SONAR_AUTH_TOKEN}'
                 }
             }
         }
@@ -45,6 +36,7 @@ pipeline {
         stage('3. Quality Gate (SonarQube)') {
             steps {
                 // Attend le résultat de l'analyse et bloque le pipeline si la Quality Gate de SonarQube échoue.
+                // Cette étape nécessite que l'analyse SAST ait réussi.
                 waitForQualityGate abortPipeline: true
             }
         }
@@ -74,7 +66,6 @@ pipeline {
         stage('6. DAST (OWASP ZAP)') {
             steps {
                 // Lance un scan dynamique sur l'application déployée.
-                // Le conteneur ZAP doit pouvoir accéder à l'URL de staging.
                 sh "docker run --rm -v ${env.WORKSPACE}:/zap/wrk/:rw owasp/zap2docker-stable zap-baseline.py -t ${STAGING_APP_URL} -g gen.conf -r dast-report.html"
             }
         }
@@ -83,11 +74,9 @@ pipeline {
     post {
         always {
             echo 'Pipeline terminé. Archivage des rapports de sécurité...'
-            // Archive tous les rapports générés pour les consulter dans l'interface Jenkins.
             archiveArtifacts artifacts: '*.json, *.txt, *.html', allowEmptyArchive: true
         }
         failure {
-            // La notification par email est désactivée pour éviter une erreur si le serveur SMTP n'est pas configuré.
             echo "Le pipeline a échoué. L'envoi d'email est désactivé."
         }
         success {
