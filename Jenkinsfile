@@ -3,9 +3,11 @@ pipeline {
     agent any
 
     environment {
-        SONAR_URL = "http://localhost:9000"
-        STAGING_APP_URL = "http://staging.mon-app.com"
-        DOCKER_IMAGE_NAME = "mon-app"
+               SONARQUBE_URL = 'http://localhost:9000'
+        PATH = "$PATH:/var/lib/jenkins/.local/bin"
+        BUILD_TIMESTAMP = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+    }
+
     }
 
     stages {
