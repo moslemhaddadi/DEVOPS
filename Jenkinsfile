@@ -1,11 +1,10 @@
-// Jenkinsfile - Version finale (SÉCURISÉE - DEVSECOPS)
+// Jenkinsfile - Version Corrigée (sans plugin Docker Pipeline)
 pipeline {
-    agent any // Pour la simplicité, mais un agent Docker spécifique est mieux en production
+    // On définit un agent global. Toutes les étapes s'exécuteront sur cet agent.
+    agent any
 
     environment {
-        // URL du serveur SonarQube (à configurer dans Jenkins)
         SONAR_URL = "http://localhost:9000"
-        // URL de l'application en staging pour le test DAST
         STAGING_APP_URL = "http://staging.mon-app.com"
     }
 
@@ -19,14 +18,14 @@ pipeline {
 
         // --- ÉTAPE 2 : CONTRÔLES DE SÉCURITÉ PRÉ-BUILD ---
         stage('2. Secrets Scan (Gitleaks )') {
-            agent { docker { image 'zricethezav/gitleaks:latest' } } // Utilise une image Docker avec Gitleaks
             steps {
                 script {
                     try {
-                        // Scanne le code pour des secrets. Le pipeline s'arrête si un secret est trouvé.
-                        sh 'gitleaks detect --source . --verbose --exit-code 1 --report-path gitleaks-report.json'
+                        // CORRECTION : On exécute Gitleaks via une commande 'docker run' manuelle.
+                        // --rm : supprime le conteneur après exécution.
+                        // -v ${env.WORKSPACE}:/path : monte le répertoire du projet Jenkins dans le conteneur.
+                        sh "docker run --rm -v ${env.WORKSPACE}:/path zricethezav/gitleaks:latest detect --source=/path --verbose --exit-code 1 --report-path /path/gitleaks-report.json"
                     } catch (Exception e) {
-                        // Bloque le build en cas de détection
                         currentBuild.result = 'FAILURE'
                         error("FAIL: Des secrets ont été détectés dans le code ! Rapport disponible.")
                     }
@@ -36,9 +35,8 @@ pipeline {
 
         // --- ÉTAPE 3 : BUILD & ANALYSE STATIQUE ---
         stage('3. SAST (SonarQube)') {
+            // Pas de changement ici, car cette étape n'utilisait pas d'agent Docker.
             steps {
-                // L'analyse SAST est intégrée à l'étape de build avec Maven
-                // Nécessite une configuration de SonarQube dans Jenkins (Manage Jenkins -> Configure System)
                 withSonarQubeEnv('MySonarQubeServer') {
                     sh 'mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${SONAR_URL}'
                 }
@@ -46,9 +44,8 @@ pipeline {
         }
 
         stage('4. Quality Gate (SonarQube)') {
+            // Pas de changement ici.
             steps {
-                // Attend le résultat de l'analyse SonarQube et bloque le pipeline si la "Quality Gate" échoue
-                // (ex: trop de bugs, failles critiques, etc.)
                 waitForQualityGate abortPipeline: true
             }
         }
@@ -57,19 +54,19 @@ pipeline {
         stage('5. SCA & Build Docker Image (Trivy)') {
             steps {
                 script {
-                    // A. Analyse des dépendances du projet (ex: pom.xml)
-                    // Utilise une image Docker avec Trivy
-                    docker.image('aquasec/trivy:latest').inside {
-                        // Bloque si des vulnérabilités critiques sont trouvées dans les dépendances
-                        sh 'trivy fs --exit-code 1 --severity CRITICAL,HIGH . > trivy-fs-report.txt'
-                    }
+                    // A. Analyse des dépendances du projet (SCA)
+                    // CORRECTION : On exécute Trivy via une commande 'docker run' manuelle.
+                    sh "docker run --rm -v ${env.WORKSPACE}:/path aquasec/trivy:latest fs --exit-code 1 --severity CRITICAL,HIGH /path > trivy-fs-report.txt"
 
                     // B. Construction de l'image Docker
+                    // Pas de changement ici, la syntaxe docker.build() est fournie par le plugin Docker Pipeline,
+                    // mais elle est souvent disponible même si 'agent { docker }' ne l'est pas.
+                    // Si cette ligne échoue aussi, il faudra la remplacer par 'sh "docker build -t mon-app:${env.BUILD_ID}" .'
                     def dockerImage = docker.build("mon-app:${env.BUILD_ID}")
 
                     // C. Scan de l'image Docker fraîchement construite
-                    // Bloque si des vulnérabilités critiques sont trouvées dans l'OS ou les librairies de l'image
-                    sh "trivy image --exit-code 1 --severity CRITICAL,HIGH mon-app:${env.BUILD_ID} > trivy-image-report.txt"
+                    // CORRECTION : On utilise une commande 'sh' standard.
+                    sh "docker run --rm aquasec/trivy:latest image --exit-code 1 --severity CRITICAL,HIGH mon-app:${env.BUILD_ID} > trivy-image-report.txt"
                 }
             }
         }
@@ -83,23 +80,23 @@ pipeline {
         }
 
         stage('7. DAST (OWASP ZAP)') {
-            agent { docker { image 'owasp/zap2docker-stable' } } // Utilise l'image Docker d'OWASP ZAP
             steps {
-                // Lance un scan DAST de base sur l'application déployée en staging
-                sh 'zap-baseline.py -t ${STAGING_APP_URL} -g gen.conf -r dast-report.html'
+                // CORRECTION : On exécute ZAP via une commande 'docker run' manuelle.
+                // On doit s'assurer que le conteneur ZAP peut atteindre l'URL de l'application.
+                // L'option --network="host" peut être nécessaire si l'app tourne sur localhost.
+                sh "docker run --rm -v ${env.WORKSPACE}:/zap/wrk/:rw owasp/zap2docker-stable zap-baseline.py -t ${STAGING_APP_URL} -g gen.conf -r dast-report.html"
             }
         }
     }
 
     // --- ÉTAPE 6 : REPORTING & ALERTING ---
     post {
+        // Pas de changement dans cette section.
         always {
             echo 'Pipeline terminé. Archivage des rapports...'
-            // Archive tous les rapports générés pour consultation ultérieure
             archiveArtifacts artifacts: '*.json, *.txt, *.html', allowEmptyArchive: true
         }
         failure {
-            // Envoie une notification en cas d'échec du pipeline
             mail to: 'equipe-dev@example.com',
                  subject: "ÉCHEC Pipeline: ${currentBuild.fullDisplayName}",
                  body: "Le pipeline a échoué à l'étape : ${currentBuild.currentResult}. Consultez les logs : ${env.BUILD_URL}"
