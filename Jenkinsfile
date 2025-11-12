@@ -1,14 +1,12 @@
-// Jenkinsfile - Version Corrigée (Authentification SonarQube via env)
+// Jenkinsfile - Version Finale et Robuste
 pipeline {
     agent any
 
     environment {
-               SONARQUBE_URL = 'http://localhost:9000'
-        PATH = "$PATH:/var/lib/jenkins/.local/bin"
-        BUILD_TIMESTAMP = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+        SONAR_URL = "http://localhost:9000"
+        STAGING_APP_URL = "http://staging.mon-app.com"
+        DOCKER_IMAGE_NAME = "mon-app"
     }
-
-    
 
     stages {
         stage('1. Secrets Scan (Gitleaks )') {
@@ -26,9 +24,10 @@ pipeline {
 
         stage('2. SAST (SonarQube)') {
             steps {
-                withSonarQubeEnv('MySonarQubeServer') {
-                    // CORRECTION DÉFINITIVE : Utilisation de la syntaxe env.VARIABLE
-                    sh "mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${env.SONAR_URL} -Dsonar.login=${env.SONAR_AUTH_TOKEN}"
+                // On utilise withCredentials pour charger le token manuellement. C'est la méthode la plus fiable.
+                // Remplacez 'sonarqube-auth-token' par l'ID exact de votre secret dans Jenkins.
+                withCredentials([string(credentialsId: 'sonarqube-auth-token', variable: 'SONAR_TOKEN_SECRET')]) {
+                    sh "mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${env.SONAR_URL} -Dsonar.login=${SONAR_TOKEN_SECRET}"
                 }
             }
         }
@@ -39,6 +38,7 @@ pipeline {
             }
         }
 
+        // ... reste du pipeline ...
         stage('4. SCA & Build Docker Image (Trivy)') {
             steps {
                 script {
@@ -74,5 +74,4 @@ pipeline {
             echo 'Pipeline terminé avec succès !'
         }
     }
-
-    }
+}
