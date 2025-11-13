@@ -1,4 +1,4 @@
-// Jenkinsfile - Version Finale et Robuste
+// Jenkinsfile - Version Finale (Hybride et Robuste)
 pipeline {
     agent any
 
@@ -24,21 +24,21 @@ pipeline {
 
         stage('2. SAST (SonarQube)') {
             steps {
-                // On utilise withCredentials pour charger le token manuellement. C'est la méthode la plus fiable.
-                // Remplacez 'sonarqube-auth-token' par l'ID exact de votre secret dans Jenkins.
-                withCredentials([string(credentialsId: 'sonarqube-auth-token', variable: 'SONAR_TOKEN_SECRET')]) {
-                    sh "mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${env.SONAR_URL} -Dsonar.login=${SONAR_TOKEN_SECRET}"
+                // CORRECTION : On remet le withSonarQubeEnv pour la communication avec la Quality Gate
+                withSonarQubeEnv('MySonarQubeServer') {
+                    // Et on garde notre commande manuelle fiable à l'intérieur
+                    sh "mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${env.SONAR_URL} -Dsonar.login=${env.SONAR_AUTH_TOKEN}"
                 }
             }
         }
 
         stage('3. Quality Gate (SonarQube)') {
             steps {
+                // Cette étape devrait maintenant fonctionner car elle est dans le même contexte que withSonarQubeEnv
                 waitForQualityGate abortPipeline: true
             }
         }
 
-        // ... reste du pipeline ...
         stage('4. SCA & Build Docker Image (Trivy)') {
             steps {
                 script {
