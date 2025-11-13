@@ -1,56 +1,49 @@
+// Jenkinsfile - Version Robuste et Adaptée à votre projet
 pipeline {
     agent any
+
     environment {
-        SONAR_HOME = tool "Sonar"
+        SONAR_URL = "http://localhost:9000"
     }
 
     stages {
-        stage("Code from github") {
+        stage("1. SAST (SonarQube Analysis )") {
             steps {
-                // MODIFICATION APPLIQUÉE ICI
-                git url: "https://github.com/moslemhaddadi/DEVOPS.git", branch: "main"
-            }
-        }
-
-        // --- LES ÉTAPES SUIVANTES SONT INCHANGÉES ---
-
-        stage("SonarQube Quality Analysis" ) {
-            steps {
-                withSonarQubeEnv("Sonar") {
-                    sh "$SONAR_HOME/bin/sonar-scanner -Dsonar.projectName=wanderlust -Dsonar.projectKey=wanderlust "
+                // On combine withSonarQubeEnv (pour la Quality Gate)
+                // et la commande mvn fiable que nous avons établie.
+                withSonarQubeEnv('MySonarQubeServer') {
+                    sh "mvn clean verify sonar:sonar -Dsonar.projectKey=mon-projet -Dsonar.host.url=${env.SONAR_URL} -Dsonar.login=${env.SONAR_AUTH_TOKEN}"
                 }
             }
         }
 
-        stage('Install Node Dependencies') {
+        stage("2. Quality Gate (SonarQube)") {
             steps {
-                sh """
-                echo "Installing Node dependencies..."
-                cd frontend && npm install || true
-                cd ../backend && npm install || true
-                """
-            }
-        }
-
-        stage("OWASP Dependency Check") {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'dc'
-                dependencyCheckPublisher pattern: ' **/dependency-check-report.xml'
-            }
-        }
-
-        stage("Sonal Quality Gate Scan") {
-            steps {
-                timeout(time: 2, unit: "MINUTES") {
-                    waitForQualityGate abortPipeline: false
+                // Attend le verdict de SonarQube avec un timeout pour éviter un blocage.
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        stage("Trivy File System Scan ") {
+        // Ajoutez ici les autres étapes que vous voulez conserver, comme Trivy.
+        stage("3. SCA (Trivy File System Scan)") {
             steps {
-                sh "trivy fs --format table -o trivy-fs-report.html ."
+                sh "docker run --rm -v ${env.WORKSPACE}:/path aquasec/trivy:latest fs --format table -o trivy-fs-report.html /path"
             }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline terminé. Archivage des rapports...'
+            archiveArtifacts artifacts: 'trivy-fs-report.html', allowEmptyArchive: true
+        }
+        failure {
+            echo "Le pipeline a échoué."
+        }
+        success {
+            echo 'Pipeline terminé avec succès !'
         }
     }
 }
