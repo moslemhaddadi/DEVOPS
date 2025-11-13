@@ -1,4 +1,4 @@
-// Jenkinsfile - Version Corrigée (avec la syntaxe du timeout corrigée)
+// Jenkinsfile - Version Corrigée (sans le bloc 'tools')
 pipeline {
     agent any
 
@@ -6,11 +6,7 @@ pipeline {
         SONAR_URL = "http://localhost:9000"
     }
 
-    // Outils à configurer dans Jenkins > Global Tool Configuration
-    // 'dc' doit être le nom de votre installation Dependency-Check
-    tools {
-        dependencyCheck 'dc'
-    }
+    // Le bloc 'tools' a été supprimé car 'dependencyCheck' n'est pas un type d'outil valide ici.
 
     stages {
         stage("1. Checkout Code from GitHub" ) {
@@ -29,8 +25,7 @@ pipeline {
 
         stage("3. Quality Gate (SonarQube)") {
             steps {
-                // CORRECTION : Ajout de la virgule entre les paramètres time et unit.
-                timeout(time: 2, unit: 'MINUTES') {
+                timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -38,8 +33,8 @@ pipeline {
 
         stage("4. SCA (OWASP Dependency Check)") {
             steps {
+                // 'dc' doit correspondre au nom de l'installation configurée dans Manage Jenkins > Global Tool Configuration.
                 dependencyCheck additionalArguments: '--scan . --format HTML --format XML', odcInstallation: 'dc'
-                // L'étape de publication des résultats est généralement faite dans la section 'post'
             }
         }
         
@@ -53,8 +48,9 @@ pipeline {
     post {
         always {
             echo 'Pipeline terminé. Archivage des rapports...'
-            // On publie le rapport Dependency-Check ici.
+            // Publie le rapport XML pour que Jenkins puisse afficher les graphiques de tendances.
             dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            // Archive les rapports HTML pour consultation manuelle.
             archiveArtifacts artifacts: '**/dependency-check-report.html, trivy-fs-report.html', allowEmptyArchive: true
         }
         failure {
